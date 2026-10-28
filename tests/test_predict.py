@@ -76,3 +76,52 @@ def test_missing_model_file_raises(tmp_path):
     """Loading a nonexistent file gives a helpful FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="Run 'python train.py'"):
         load_trained_model(tmp_path / "nope.joblib")
+
+
+# ---------------------------------------------------------------------------
+# Additional predict.py coverage
+# ---------------------------------------------------------------------------
+
+
+def test_dataframe_input_is_accepted(fitted):
+    """predict_rows must accept a DataFrame directly without reshaping."""
+    pipeline, X_test = fitted
+    preds = predict_rows(pipeline, X_test)
+    assert len(preds) == len(X_test)
+    assert set(np.unique(preds)).issubset({0, 1})
+
+
+def test_predictions_are_integer_labels(fitted):
+    """Predictions must be integer class labels (0 or 1), not floats or strings."""
+    pipeline, X_test = fitted
+    preds = predict_rows(pipeline, X_test)
+    assert preds.dtype.kind in ("i", "u"), (
+        f"Expected integer dtype, got {preds.dtype}"
+    )
+
+
+def test_multiple_rows_2d_array_accepted(fitted):
+    """A 2D numpy array of shape (n, 30) must work without conversion errors."""
+    pipeline, X_test = fitted
+    arr = X_test.head(10).to_numpy()
+    assert arr.shape == (10, 30)
+    preds = predict_rows(pipeline, arr)
+    assert preds.shape == (10,)
+
+
+def test_wrong_shape_2d_array_raises(fitted):
+    """A 2D array with the wrong column count must also raise clearly."""
+    pipeline, _ = fitted
+    bad_2d = np.zeros((3, 29))
+    with pytest.raises(ValueError, match="Expected 30 features"):
+        predict_rows(pipeline, bad_2d)
+
+
+def test_load_roundtrip_predictions_match_in_memory_exact(tmp_path, fitted):
+    """joblib save -> load predictions must be element-wise identical to in-memory."""
+    pipeline, X_test = fitted
+    path = tmp_path / "exact_match.joblib"
+    import joblib
+    joblib.dump(pipeline, path)
+    loaded = load_trained_model(path)
+    assert (pipeline.predict(X_test) == predict_rows(loaded, X_test)).all()

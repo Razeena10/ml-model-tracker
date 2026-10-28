@@ -32,8 +32,12 @@ import pandas as pd
 
 from src.data_loader import load_dataset
 
+# Resolve paths relative to THIS file's directory (the project root) so
+# predict.py works correctly when invoked from any working directory.
+_HERE = Path(__file__).resolve().parent
+
 # Where train.py saves the fitted pipeline
-DEFAULT_MODEL_PATH = Path("artifacts") / "model.joblib"
+DEFAULT_MODEL_PATH = _HERE / "artifacts" / "model.joblib"
 
 # The Breast Cancer dataset always has 30 features; predictions must match
 EXPECTED_N_FEATURES = 30

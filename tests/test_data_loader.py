@@ -49,3 +49,48 @@ def test_validate_rows_raises_on_mismatch():
     X, y = load_dataset()
     with pytest.raises(ValueError, match="mismatch"):
         validate_rows(X, y.iloc[:-1])  # drop one label on purpose
+
+# ---------------------------------------------------------------------------
+# Additional loading & feature/label consistency checks
+# ---------------------------------------------------------------------------
+
+
+def test_target_values_are_only_binary():
+    """Labels must be exactly the two documented integer classes (0 and 1)."""
+    _, y = load_dataset()
+    assert set(y.unique()) == {0, 1}
+
+
+def test_target_series_has_expected_name():
+    """The target Series keeps a readable name so joined tables stay clear."""
+    _, y = load_dataset()
+    assert y.name == "target"
+
+
+def test_features_are_all_numeric():
+    """All 30 features must be numeric (the pipeline scales them)."""
+    X, _ = load_dataset()
+    assert len(X.columns) == 30
+    # Numeric dtype for every column (int/float/bool all count as numeric)
+    assert all(pd.api.types.is_numeric_dtype(X[c]) for c in X.columns)
+
+
+def test_no_duplicate_feature_columns():
+    """Feature names must be unique so column lookups are unambiguous."""
+    X, _ = load_dataset()
+    assert X.columns.is_unique
+
+
+def test_features_and_labels_are_index_aligned():
+    """X and y must share the same index (row i of X matches row i of y)."""
+    X, y = load_dataset()
+    assert X.index.equals(y.index)
+    assert len(X) == len(y) == 569
+
+
+def test_validate_rows_rejects_empty_dataset():
+    """validate_rows must refuse an empty feature/label pair."""
+    empty_X = pd.DataFrame()
+    empty_y = pd.Series([], dtype=int)
+    with pytest.raises(ValueError, match="empty"):
+        validate_rows(empty_X, empty_y)

@@ -8,13 +8,17 @@ This script keeps ONE training/evaluation path; MLflow tracking wraps it
 via the helpers in src/tracking.py (no duplicated logic).
 
 Run with:  python train.py
-UI with:   mlflow ui --backend-store-uri sqlite:///mlflow.db
+UI with:   mlflow ui --backend-store-uri <TRACKING_URI>
+           (TRACKING_URI is printed at the end of a successful run)
+
+Override the tracking store for an isolated run (e.g. outside OneDrive):
+    set MLFLOW_TRACKING_URI=sqlite:///C:/tmp/test.db  # Windows cmd
+    python train.py
 """
 
 from pathlib import Path
 
 import joblib
-import mlflow
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
@@ -22,14 +26,17 @@ from sklearn.preprocessing import StandardScaler
 
 from src.data_loader import POSITIVE_CLASS, load_dataset
 from src.evaluate import compute_metrics, print_metrics, save_metrics
-from src.tracking import (
-    TRACKING_URI,
-    log_metrics_dict,
-    log_parameters,
-    log_run_metadata,
-    log_trained_model,
-    setup_experiment,
-)
+
+# NOTE: MLflow and src.tracking are intentionally NOT imported at module top.
+# They are only needed by ``main()`` for experiment tracking. Deferring them
+# keeps ``train`` importable by tests that only use build_pipeline()/split_data(),
+# so those tests don't pull in the tracking stack, start an MLflow server, or
+# risk creating unintended tracking runs. The imports live inside main().
+
+# Resolve artifact output paths relative to THIS file's directory (the project
+# root) so train.py works correctly when invoked from any working directory.
+_HERE = Path(__file__).resolve().parent
+ARTIFACTS_DIR = _HERE / "artifacts"
 
 # Fixed seed => every run produces the exact same split => reproducible results
 RANDOM_STATE = 42
@@ -80,6 +87,20 @@ def main() -> None:
     print(f"Testing samples:  {len(X_test)}")
 
     try:
+        # MLflow is only needed for tracking. Importing it here (rather than at
+        # module top) keeps ``train`` importable by tests that only need
+        # build_pipeline()/split_data(), without pulling in the tracking stack
+        # or creating any MLflow run. Actual tracking still works end-to-end.
+        import mlflow
+        from src.tracking import (
+            TRACKING_URI,
+            log_metrics_dict,
+            log_parameters,
+            log_run_metadata,
+            log_trained_model,
+            setup_experiment,
+        )
+
         # Everything inside this `with` block is ONE MLflow run.
         # On any exception, MLflow marks the run FAILED automatically
         # and the except-block below reports it clearly (requirement 7).
@@ -101,14 +122,17 @@ def main() -> None:
             metrics = compute_metrics(y_test, y_pred)
             print_metrics(metrics)
 
-            # 6. Save machine-readable results under artifacts/ (git-ignored)
-            out_path = save_metrics(metrics, Path("artifacts") / "metrics.json")
+            # 6. Save machine-readable results under artifacts/ (git-ignored).
+            #    Paths are absolute (relative to the project root via ARTIFACTS_DIR)
+            #    so this works correctly when called from any working directory.
+            ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+            out_path = save_metrics(metrics, ARTIFACTS_DIR / "metrics.json")
             print(f"\nMetrics saved to: {out_path}")
 
             # 6b. Serialize the FITTED pipeline with joblib so predict.py
             #     can reuse it without retraining. joblib (not pickle) is
             #     sklearn's recommended format for models with numpy arrays.
-            model_path = Path("artifacts") / "model.joblib"
+            model_path = ARTIFACTS_DIR / "model.joblib"
             joblib.dump(pipeline, model_path)
             print(f"Model saved to: {model_path}")
 
@@ -149,7 +173,7 @@ def main() -> None:
             run_id = active_run.info.run_id
             print(f"\nMLflow run recorded: {run_id}")
             print(f"Tracking store: {TRACKING_URI}")
-            print("View it with:  mlflow ui --backend-store-uri sqlite:///mlflow.db")
+            print(f"View it with:  mlflow ui --backend-store-uri {TRACKING_URI}")
     except Exception as exc:
         # Report the failure clearly, then re-raise so the process
         # still exits non-zero (CI and shells can detect it).
